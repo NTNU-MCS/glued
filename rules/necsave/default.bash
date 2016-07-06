@@ -8,6 +8,11 @@ branch=\
     'master'
 )
 
+vplanner_branch=\
+(
+	'release/integration_02'
+)
+
 maintainer=\
 (
     "Jose Pinto <zepinto@fe.up.pt>"
@@ -28,10 +33,11 @@ download()
         cd integration && cd - &&
     git clone -b $branch "git@necsave.info:necsave/communications.git" source &&
         cd source && cd - &&
-        for module in duneplatform missionplanner perception vehicleplanner; do
+        for module in duneplatform missionplanner perception; do
             git clone -b $branch "git@necsave.info:necsave/$module.git" "source/src/Modules/$module"
             cd "source/src/Modules/$module" && cd -
         done
+        git clone -b $vplanner_branch "git@necsave.info:necsave/vehicleplanner.git" "source/src/Modules/vehicleplanner"        
 }
 
 configure()
