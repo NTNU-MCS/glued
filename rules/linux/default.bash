@@ -25,13 +25,62 @@ requires=\
     'lz4/host'
 )
 
+# This variable is updated by find_patches().
+patches=()
+
+# Major/Minor version.
+linux_mm_version()
+{
+    echo "$version" | cut -f1-2 -d.
+}
+
+# Major/Minor/Patch version.
+linux_mmp_version()
+{
+    echo "$version" | cut -f1 -d-
+}
+
+find_patches()
+{
+    patches=(\
+        $(ls -1 \
+             "$pkg_dir/patches/$version/"*.patch \
+             "$pkg_dir/patches/$(linux_mmp_version)/"*.patch \
+             "$pkg_dir/patches/$(linux_mm_version)/"*.patch \
+             "$cfg_dir_system/patches/linux/$version/"*.patch \
+             "$cfg_dir_system/patches/linux/$(linux_mmp_version)/"*.patch \
+             "$cfg_dir_system/patches/linux/$(linux_mm_version)/"*.patch \
+             2> /dev/null | awk '!a[$0]++')
+    )
+}
+
+find_patches
+
+# Get configuration file.
+linux_cfg_file()
+{
+    for f in "$version" "$(linux_mmp_version)" "$(linux_mm_version)"; do
+        f="$cfg_dir_system/cfg/linux-$f.cfg"
+        if [ -f "$f" ]; then
+            echo "$f"
+            return 0
+        fi
+
+        echo "Candidate kernel configuration file '$f' doesn't exist." 1>&2
+    done
+
+    echo "ERROR: failed to find a valid kernel configuration file." 1>&2
+    return 1
+}
+
 post_unpack()
 {
-    patches=$(ls "$pkg_dir/patches/$version/"*.patch\
-	"$cfg_dir_system/patches/linux/$version/"*.patch 2>/dev/null)
-    if [ -n "$patches" ]; then
-        cat $patches | patch -p1
-    fi
+    n=0; while [ -n "${patches[$n]}" ]; do
+             patch="${patches[$n]}"
+             echo "* Applying $patch..."
+             (ucat "$patch" | patch -p1) || return 1
+             let n++
+         done
 
     if [ -d "$cfg_dir_toolchain/firmware" ]; then
         tar -C "$cfg_dir_toolchain/firmware" -c -v -f - . | tar -C firmware -x -v -f -
@@ -41,7 +90,7 @@ post_unpack()
 refresh()
 {
     for rule in configure build target_install; do
-        if [ "$cfg_dir_system/cfg/linux-${version}.cfg" -nt "$cfg_dir_builds/linux/$pkg_var/.$rule" ]; then
+        if [ "$(linux_cfg_file)" -nt "$cfg_dir_builds/linux/$pkg_var/.$rule" ]; then
             rm "$cfg_dir_builds/linux/$pkg_var/.$rule"
         fi
     done
@@ -51,9 +100,11 @@ configure()
 {
     $cmd_make \
         ARCH=${cfg_target_linux} \
-        mrproper &&
+        mrproper || return 1
 
-    cp "$cfg_dir_system/cfg/linux-${version}.cfg" .config &&
+    cfg="$(linux_cfg_file)"
+    [ -n "$cfg" ] || return 1
+    $cmd_cp "$cfg" .config || return 1
 
     if [ -f "$cfg_dir_system/files/initramfs_init.sh" ]; then
         $cmd_mkdir initramfs &&
@@ -72,17 +123,18 @@ build()
 {
     $cmd_make \
         CROSS_COMPILE=$cfg_target_canonical- \
-        ARCH=$cfg_target_linux &&
+        ARCH=$cfg_target_linux || return 1
+
     $cmd_make \
         CROSS_COMPILE=$cfg_target_canonical- \
         ARCH=$cfg_target_linux \
-        modules &&
+        modules || return 1
 
     if [ "$(basename $cfg_target_linux_kernel)" = 'uImage' ]; then
         $cmd_make \
             CROSS_COMPILE=$cfg_target_canonical- \
             ARCH=$cfg_target_linux \
-            uImage
+            uImage || return 1
     fi
 
     # Compressed image.
@@ -90,7 +142,7 @@ build()
         $cmd_make \
             CROSS_COMPILE=$cfg_target_canonical- \
             ARCH=$cfg_target_linux \
-            zImage
+            zImage || return 1
     fi
 
     # Device tree blob.
@@ -98,22 +150,13 @@ build()
         $cmd_make \
             CROSS_COMPILE=$cfg_target_canonical- \
             ARCH=$cfg_target_linux \
-            dtbs
+            dtbs || return 1
     fi
 
     if [ -n "${cfg_target_linux_size}" ]; then
         dd if="$cfg_target_linux_kernel" of="${cfg_target_linux_kernel}.padded" \
             ibs="${cfg_target_linux_size}" conv=sync &&
         mv "${cfg_target_linux_kernel}.padded" "${cfg_target_linux_kernel}"
-    fi
-}
-
-host_install()
-{
-    # Device tree blobs.
-    if [ -n "$cfg_target_linux_dtb" ]; then
-        $cmd_mkdir "$cfg_dir_toolchain/boot" &&
-            cp -v "$(dirname $cfg_target_linux_dtb)/"*.dtb "$cfg_dir_toolchain/boot"
     fi
 }
 
@@ -130,6 +173,20 @@ target_install()
     else
         echo "ERROR: failed to find kernel image at '$cfg_target_linux_kernel'"
         return 1
+    fi
+
+    # Device tree blobs.
+    dts="arch/$cfg_target_linux/boot/dts"
+    if [ -d "$dts" ]; then
+        $cmd_mkdir "$cfg_dir_rootfs/boot" &&
+            cp -v "$dts/"*.dtb "$cfg_dir_rootfs/boot"
+    fi
+
+    # Device tree overlays.
+    overlays_dir="arch/$cfg_target_linux/boot/dts/overlays"
+    if [ -d "$overlays_dir" ]; then
+	$cmd_mkdir "$cfg_dir_rootfs/boot/overlays" || return 1
+        $cmd_cp "$overlays_dir"/*.dtbo "$cfg_dir_rootfs/boot/overlays" || return 1
     fi
 
     $cmd_make \
