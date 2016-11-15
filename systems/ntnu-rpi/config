@@ -1,5 +1,4 @@
 cfg_architecture='cortex-a8-hardfp'
-cfg_kernel_boot_dev='/dev/mmcblk0p1'
 cfg_storage='data0:ext4:/opt'
 cfg_modules=''
 cfg_services0='network dropbear storage upgrade syslog ptpd'
