@@ -1,3 +1,4 @@
+#! /bin/bash
 ###########################################################################
 # GLUED: GNU/Linux Uniform Environment Distribution                       #
 # Copyright (C) 2007-2017 Universidade do Porto - Faculdade de Engenharia #
@@ -18,37 +19,50 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA           #
 # 02110-1301 USA.                                                         #
 ###########################################################################
-# Author: Ricardo Martins                                                 #
+# Author: Tiago Marques                                                   #
 ###########################################################################
 
-nfo1()
+update_tool()
 {
-    echo -e "[$(date +"%Y-%m-%d %H:%M:%S")] \033[0m\033[1;34m* $*\033[0m"
+    rsync -v "$1" root@"$2":/opt/lsts/glued/
+    if [ $? -eq 0 ]; then
+        return 0
+    fi
+
+    scp "$1" root@"$2":/opt/lsts/glued/
+    if [ $? -eq 0 ]; then
+        return 0
+    fi
+
+    return 1
 }
 
-nfo2()
-{
-    echo -e "[$(date +"%Y-%m-%d %H:%M:%S")] \033[0m\033[0;35m** $*\033[0m"
-}
+# Check command line arguments.
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <config>"
+    exit 1
+fi
 
-ok()
-{
-    echo -e "[$(date +"%Y-%m-%d %H:%M:%S")] \033[0m\033[0;32m** $*\033[0m"
-}
+# Read system configuration file.
+if ! [ -f "$1" ]; then
+    echo -e "\e[1;31mERROR: invalid configuration file '$1'\e[0m"
+    exit 1
+fi
 
-err()
-{
-    echo -e "[$(date +"%Y-%m-%d %H:%M:%S")] \033[0m\033[1;31mERROR: $*\033[0m"
-}
+# Read system configuration file.
+source "$1"
 
-ucat()
-{
-    case "$1" in
-        *.gz)
-            zcat "$1"
-            ;;
-        *)
-            cat "$1"
-            ;;
-    esac
-}
+if [ ! -f "$cfg_rootfs_tar" ];
+then
+    echo -e "\e[1;31mERROR: You should run ./pkrootfs $1\e[0m"
+    exit 1
+fi
+
+# check for dirty repo
+if [[ "$cfg_glued_git_version" =~ .*-dirty$ ]]
+then
+    echo -e "\e[1;31mThis glued's version is dirty\e[0m"
+fi
+
+# send package to the system
+update_tool "$cfg_rootfs_tar" "$cfg_eth_ext_ip"
